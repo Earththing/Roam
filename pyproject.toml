@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "roam"
+version = "0.1.0"
+description = "Isochrone explorer: shade the area reachable from a point by walking, biking, driving (and more), with suggested routes inside it."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "osmnx>=2.0",
+    "networkx>=3.0",
+    "shapely>=2.0",
+    "scipy>=1.10",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "httpx>=0.26",
+    "typer>=0.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+roam = "roam.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["roam*"]
+
+[tool.setuptools.package-data]
+roam = ["web/*"]

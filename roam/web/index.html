@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Roam — how far can I get?</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <aside id="panel">
+    <h1>Roam</h1>
+    <p class="hint">Click the map to set a starting point, or search:</p>
+    <div class="row">
+      <input id="search" type="text" placeholder="Search address or place…" />
+    </div>
+    <ul id="search-results"></ul>
+
+    <h2>Mode</h2>
+    <div id="modes" class="btn-group"></div>
+    <div id="planned-modes" class="planned"></div>
+
+    <h2>Limit</h2>
+    <div class="row">
+      <select id="limit-type">
+        <option value="time">Time (minutes)</option>
+        <option value="distance">Distance (km)</option>
+      </select>
+      <input id="limit-value" type="number" value="15" min="1" step="1" />
+    </div>
+    <input id="limit-slider" type="range" min="1" max="120" value="15" />
+
+    <h2>Overlays</h2>
+    <label><input type="checkbox" id="ov-loops" /> Loop routes</label>
+    <label><input type="checkbox" id="ov-oab" /> Out-and-back routes</label>
+    <label><input type="checkbox" id="ov-tree" /> Reachable streets</label>
+
+    <button id="go" disabled>Shade the map</button>
+    <div id="status"></div>
+    <div id="routes"></div>
+  </aside>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
