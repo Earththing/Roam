@@ -8,6 +8,17 @@ import uvicorn
 app = typer.Typer(help="Roam: isochrone explorer.", no_args_is_help=True)
 
 
+@app.callback()
+def main():
+    """Roam: isochrone explorer.
+
+    With a single registered command, Typer would otherwise collapse it into
+    the root command, making `roam serve` an error; this callback keeps
+    `serve` (and future commands) as named subcommands.
+    """
+
+
+
 @app.command()
 def serve(
     host: str = typer.Option("127.0.0.1", help="Bind address (0.0.0.0 to expose)."),
