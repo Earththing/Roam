@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Roam — how far can I get?</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🥾</text></svg>" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
@@ -23,10 +24,14 @@
     <h2>Limit</h2>
     <div class="row">
       <select id="limit-type">
-        <option value="time">Time (minutes)</option>
-        <option value="distance">Distance (km)</option>
+        <option value="time">Time (min)</option>
+        <option value="distance">Distance</option>
       </select>
-      <input id="limit-value" type="number" value="15" min="1" step="1" />
+      <input id="limit-value" type="number" value="15" min="0.5" step="0.5" />
+      <select id="units" title="Units for distances">
+        <option value="mi">mi</option>
+        <option value="km">km</option>
+      </select>
     </div>
     <input id="limit-slider" type="range" min="1" max="120" value="15" />
 

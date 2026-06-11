@@ -34,8 +34,8 @@ def register(mode: Mode) -> None:
     MODES[mode.key] = mode
 
 
-register(Mode("walk", "Walking", "walk", default_speed_kmh=4.8, local_radius_warn_km=8))
-register(Mode("bike", "Biking", "bike", default_speed_kmh=15.0, local_radius_warn_km=15))
+register(Mode("walk", "Walking", "walk", default_speed_kmh=4.8, local_radius_warn_km=12))
+register(Mode("bike", "Biking", "bike", default_speed_kmh=15.0, local_radius_warn_km=20))
 register(
     Mode(
         "drive",

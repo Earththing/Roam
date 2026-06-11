@@ -19,7 +19,11 @@ roam serve
 Click the map (or search an address), pick a mode and a limit, toggle the
 overlays you want, and hit **Shade the map**. The first computation for a new
 area downloads its street network from OpenStreetMap (a few seconds for
-walking ranges); it's cached under `~/.cache/roam/` after that.
+walking ranges, minutes for very large ones); it's cached under
+`~/.cache/roam/` after that.
+
+Distances can be entered in miles or kilometers (the toggle defaults to miles
+for US browser locales); the JSON API itself is always metric.
 
 Run the tests (no network needed — they use a synthetic street grid):
 

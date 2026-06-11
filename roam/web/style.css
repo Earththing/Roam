@@ -17,6 +17,8 @@ input[type="text"], input[type="number"], select {
   background: #28324300; background-color: #283243; color: #e8ecf3; font-size: 14px;
 }
 input[type="range"] { width: 100%; margin-top: 8px; }
+#units { flex: 0 0 60px; }
+#limit-value { flex: 1; }
 
 #search-results { list-style: none; margin: 6px 0 0; padding: 0; }
 #search-results li {

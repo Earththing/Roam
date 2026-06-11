@@ -32,7 +32,7 @@ def radius_for(mode: Mode, time_min: float | None, distance_km: float | None) ->
         speed = mode.default_speed_kmh if not mode.use_edge_speeds else 110.0
         reach_km = speed * (time_min or 15) / 60.0
     # Pad: street networks meander, and the start point snaps to a node.
-    return max(500.0, reach_km * 1000.0 * 1.15)
+    return max(500.0, reach_km * 1000.0 * 1.08 + 250.0)
 
 
 def fetch_graph(

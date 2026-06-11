@@ -79,26 +79,45 @@ async function loadModes() {
 }
 loadModes();
 
+/* ---- units (km/mi) ---- */
+const KM_PER_MI = 1.609344;
+// Default to miles for US locales; the API itself is always metric.
+$("units").value = (navigator.language || "").toLowerCase().endsWith("-us") ? "mi" : "km";
+const usingMiles = () => $("units").value === "mi";
+const fmtDist = (meters) =>
+  usingMiles() ? `${(meters / 1000 / KM_PER_MI).toFixed(1)} mi` : `${(meters / 1000).toFixed(1)} km`;
+
 /* ---- limit controls ---- */
+function syncLimitControls() {
+  const isTime = $("limit-type").value === "time";
+  $("limit-slider").max = isTime ? 120 : usingMiles() ? 30 : 50;
+  $("limit-value").value = isTime ? 15 : usingMiles() ? 2 : 3;
+  $("limit-slider").value = $("limit-value").value;
+}
 $("limit-slider").addEventListener("input", () => { $("limit-value").value = $("limit-slider").value; });
 $("limit-value").addEventListener("input", () => { $("limit-slider").value = $("limit-value").value; });
-$("limit-type").addEventListener("change", () => {
-  const isTime = $("limit-type").value === "time";
-  $("limit-slider").max = isTime ? 120 : 50;
-  $("limit-value").value = isTime ? 15 : 3;
-  $("limit-slider").value = $("limit-value").value;
+$("limit-type").addEventListener("change", syncLimitControls);
+$("units").addEventListener("change", () => {
+  if ($("limit-type").value === "distance") {
+    // Convert the current value so 5 km becomes ~3.1 mi rather than 5 mi.
+    const v = Number($("limit-value").value);
+    const converted = usingMiles() ? v / KM_PER_MI : v * KM_PER_MI;
+    $("limit-slider").max = usingMiles() ? 30 : 50;
+    $("limit-value").value = Math.round(converted * 2) / 2 || 1;
+    $("limit-slider").value = $("limit-value").value;
+  }
 });
 
 /* ---- rendering ---- */
 const ROUTE_COLORS = ["#e74c3c", "#9b59b6", "#e67e22", "#1abc9c", "#f1c40f", "#2ecc71"];
 
 function fmtRoute(rt) {
-  const km = (rt.length_m / 1000).toFixed(1);
+  const dist = fmtDist(rt.length_m);
   if (rt.unit === "s") {
     const min = Math.round(rt.cost / 60);
-    return `${rt.kind === "loop" ? "Loop" : "Out & back"} ${rt.bearing} — ${min} min, ${km} km`;
+    return `${rt.kind === "loop" ? "Loop" : "Out & back"} ${rt.bearing} — ${min} min, ${dist}`;
   }
-  return `${rt.kind === "loop" ? "Loop" : "Out & back"} ${rt.bearing} — ${km} km`;
+  return `${rt.kind === "loop" ? "Loop" : "Out & back"} ${rt.bearing} — ${dist}`;
 }
 
 function render(data) {
@@ -153,10 +172,11 @@ async function compute(forceLocal = false) {
   if ($("ov-oab").checked) overlays.push("out_and_back");
   if ($("ov-tree").checked) overlays.push("tree");
 
+  const distVal = Number($("limit-value").value) * (usingMiles() ? KM_PER_MI : 1);
   const body = {
     lat: state.start.lat, lng: state.start.lng, mode: state.mode,
     limit_minutes: isTime ? Number($("limit-value").value) : null,
-    limit_km: isTime ? null : Number($("limit-value").value),
+    limit_km: isTime ? null : distVal,
     overlays, provider: "auto", force_local: forceLocal,
   };
 
@@ -168,13 +188,20 @@ async function compute(forceLocal = false) {
     });
     if (r.status === 409) {
       const detail = (await r.json()).detail;
+      const radius = usingMiles()
+        ? `${(detail.radius_km / KM_PER_MI).toFixed(0)} mi` : `${detail.radius_km} km`;
       const extra = detail.hosted_available
-        ? "" : "\n(Tip: set ORS_API_KEY to use a hosted provider for big areas.)";
-      if (confirm(`${detail.message}\nThis may take a while. Compute anyway?${extra}`)) {
+        ? "" : "\n(Tip: set ORS_API_KEY to offload big areas to a hosted provider.)";
+      const ok = confirm(
+        `This needs the street network for a ~${radius} radius area. ` +
+        `The first download for an area this size can take a few minutes, ` +
+        `but it's cached — repeat queries are fast.\n\nDownload and compute?${extra}`
+      );
+      if (ok) {
         state.busy = false; $("go").disabled = false;
         return compute(true);
       }
-      status("Cancelled — try a smaller limit.");
+      status("Cancelled — try a smaller limit, or confirm next time to proceed.");
       return;
     }
     if (!r.ok) {
