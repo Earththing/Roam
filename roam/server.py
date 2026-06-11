@@ -14,12 +14,14 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
+from . import jobs
 from .geocode import geocode
 from .modes import MODES, PLANNED_MODES
 from .providers import (
     PROVIDERS,
     AreaTooLargeError,
     IsochroneRequest,
+    IsochroneResponse,
     ors_key,
 )
 
@@ -65,9 +67,8 @@ def api_geocode(q: str):
         raise HTTPException(status_code=502, detail=f"Geocoding failed: {exc}")
 
 
-@app.post("/api/isochrone")
-def api_isochrone(body: IsochroneBody):
-    req = IsochroneRequest(
+def _to_request(body: IsochroneBody) -> IsochroneRequest:
+    return IsochroneRequest(
         lat=body.lat,
         lng=body.lng,
         mode=body.mode,
@@ -76,17 +77,69 @@ def api_isochrone(body: IsochroneBody):
         overlays=body.overlays,
         force_local=body.force_local,
     )
+
+
+def _payload(result: IsochroneResponse) -> dict:
+    return {
+        "polygon": result.polygon,
+        "provider": result.provider,
+        "overlays": result.overlays,
+        "warning": result.warning,
+        "stats": result.stats,
+    }
+
+
+def _run_providers(body: IsochroneBody, progress=None, cancel=None) -> IsochroneResponse:
+    req = _to_request(body)
+    if body.provider == "auto":
+        try:
+            return PROVIDERS["local-osm"].isochrone(req, progress=progress, cancel=cancel)
+        except AreaTooLargeError as exc:
+            if exc.hosted_available:
+                return PROVIDERS["openrouteservice"].isochrone(req, progress=progress)
+            raise
     try:
-        if body.provider == "auto":
-            try:
-                result = PROVIDERS["local-osm"].isochrone(req)
-            except AreaTooLargeError as exc:
-                if exc.hosted_available:
-                    result = PROVIDERS["openrouteservice"].isochrone(req)
-                else:
-                    raise
-        else:
-            result = PROVIDERS[body.provider].isochrone(req)
+        provider = PROVIDERS[body.provider]
+    except KeyError:
+        raise ValueError(f"Unknown provider {body.provider!r}")
+    return provider.isochrone(req, progress=progress, cancel=cancel)
+
+
+@app.post("/api/jobs")
+def create_job(body: IsochroneBody):
+    """Start an isochrone computation in the background; poll its job id."""
+
+    def work(job: jobs.Job) -> dict:
+        def progress(stage: str, frac: float) -> None:
+            job.stage = stage
+            job.progress = frac
+
+        return _payload(_run_providers(body, progress=progress, cancel=job.cancel_event))
+
+    return {"job_id": jobs.start(work).id}
+
+
+@app.get("/api/jobs/{job_id}")
+def job_status(job_id: str):
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown or expired job id")
+    return job.snapshot()
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def job_cancel(job_id: str):
+    job = jobs.cancel(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown or expired job id")
+    return job.snapshot()
+
+
+@app.post("/api/isochrone")
+def api_isochrone(body: IsochroneBody):
+    """Synchronous variant of /api/jobs — simpler for scripts and agents."""
+    try:
+        result = _run_providers(body)
     except AreaTooLargeError as exc:
         # 409: the frontend offers "compute locally anyway" (force_local) or a
         # smaller limit, and mentions the hosted option if a key is configured.
@@ -101,16 +154,8 @@ def api_isochrone(body: IsochroneBody):
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-    except KeyError:
-        raise HTTPException(status_code=422, detail=f"Unknown provider {body.provider!r}")
 
-    return {
-        "polygon": result.polygon,
-        "provider": result.provider,
-        "overlays": result.overlays,
-        "warning": result.warning,
-        "stats": result.stats,
-    }
+    return _payload(result)
 
 
 @app.get("/")

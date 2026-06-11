@@ -54,6 +54,10 @@ class IsochroneResponse:
     stats: dict[str, Any] = field(default_factory=dict)
 
 
+class JobCancelled(Exception):
+    """Raised inside a provider when the caller's cancel event is set."""
+
+
 class AreaTooLargeError(Exception):
     """Local compute would be slow; the caller should confirm or go hosted."""
 
@@ -70,7 +74,13 @@ class AreaTooLargeError(Exception):
 class LocalOSMProvider:
     name = "local-osm"
 
-    def isochrone(self, req: IsochroneRequest) -> IsochroneResponse:
+    def isochrone(self, req: IsochroneRequest, progress=None, cancel=None) -> IsochroneResponse:
+        report = progress or (lambda stage, frac: None)
+
+        def check_cancel():
+            if cancel is not None and cancel.is_set():
+                raise JobCancelled()
+
         mode = get_mode(req.mode)
         radius_m = graphmod.radius_for(mode, req.limit_minutes, req.limit_km)
         if radius_m / 1000.0 > mode.local_radius_warn_km and not req.force_local:
@@ -78,14 +88,22 @@ class LocalOSMProvider:
                 radius_m / 1000.0, mode, hosted_available=ors_key() is not None
             )
 
+        report("Downloading street network (one-time per area, cached)", 0.1)
         g = graphmod.fetch_graph(req.lat, req.lng, radius_m, mode)
+        check_cancel()
+
+        report("Computing reachable area", 0.6)
         start = graphmod.nearest_node(g, req.lat, req.lng)
         iso = isomod.compute_isochrone(
             g, start, req.limit_value, weight=req.weight, mode_key=mode.key
         )
+        check_cancel()
 
         overlays: dict[str, Any] = {}
+        if req.overlays:
+            report("Suggesting routes", 0.8)
         for name in req.overlays:
+            check_cancel()
             if name == "tree":
                 lines = isomod.reachability_tree_lines(g, iso)
                 overlays["tree"] = {
@@ -131,7 +149,9 @@ class OpenRouteServiceProvider:
     name = "openrouteservice"
     PROFILE = {"walk": "foot-walking", "bike": "cycling-regular", "drive": "driving-car"}
 
-    def isochrone(self, req: IsochroneRequest) -> IsochroneResponse:
+    def isochrone(self, req: IsochroneRequest, progress=None, cancel=None) -> IsochroneResponse:
+        if progress:
+            progress("Requesting area from OpenRouteService", 0.3)
         key = ors_key()
         if not key:
             raise RuntimeError("Set ORS_API_KEY to use the OpenRouteService provider.")

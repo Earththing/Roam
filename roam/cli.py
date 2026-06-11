@@ -26,7 +26,14 @@ def serve(
     reload: bool = typer.Option(False, help="Auto-reload on code changes."),
 ):
     """Start the web app, then open http://127.0.0.1:8000 in a browser."""
-    uvicorn.run("roam.server:app", host=host, port=port, reload=reload)
+    # Don't let an in-flight computation hold the process hostage on Ctrl-C.
+    uvicorn.run(
+        "roam.server:app",
+        host=host,
+        port=port,
+        reload=reload,
+        timeout_graceful_shutdown=3,
+    )
 
 
 if __name__ == "__main__":

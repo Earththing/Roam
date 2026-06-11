@@ -6,7 +6,7 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 19,
 }).addTo(map);
 
-const state = { start: null, mode: "walk", busy: false };
+const state = { start: null, mode: "walk", busy: false, jobId: null };
 let startMarker = null;
 let resultLayers = L.layerGroup().addTo(map);
 
@@ -15,6 +15,9 @@ const status = (msg, isError = false) => {
   $("status").textContent = msg;
   $("status").className = isError ? "error" : "";
 };
+
+// The panel is user-resizable; tell Leaflet when its box changes.
+new ResizeObserver(() => map.invalidateSize()).observe($("panel"));
 
 /* ---- start point ---- */
 function setStart(lat, lng, label) {
@@ -26,9 +29,60 @@ function setStart(lat, lng, label) {
     state.start = { lat: p.lat, lng: p.lng };
   });
   $("go").disabled = false;
+  $("save-place").disabled = false;
   if (label) status(`Start: ${label.split(",").slice(0, 2).join(",")}`);
 }
 map.on("click", (e) => setStart(e.latlng.lat, e.latlng.lng));
+
+/* ---- saved places (localStorage) ---- */
+const loadPlaces = () => JSON.parse(localStorage.getItem("roam.places") || "[]");
+const storePlaces = (p) => localStorage.setItem("roam.places", JSON.stringify(p));
+
+function renderPlaces() {
+  const places = loadPlaces();
+  const box = $("places");
+  box.innerHTML = "";
+  if (!places.length) {
+    box.innerHTML = '<span class="hint">None yet — set a start point, then save it.</span>';
+    return;
+  }
+  places.forEach((pl, i) => {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    const name = document.createElement("span");
+    name.textContent = pl.name;
+    chip.appendChild(name);
+    const x = document.createElement("span");
+    x.className = "x";
+    x.textContent = "×";
+    x.title = `Remove ${pl.name}`;
+    x.onclick = (e) => {
+      e.stopPropagation();
+      if (confirm(`Remove saved place "${pl.name}"?`)) {
+        const ps = loadPlaces();
+        ps.splice(i, 1);
+        storePlaces(ps);
+        renderPlaces();
+      }
+    };
+    chip.appendChild(x);
+    chip.onclick = () => {
+      map.setView([pl.lat, pl.lng], 14);
+      setStart(pl.lat, pl.lng, pl.name);
+    };
+    box.appendChild(chip);
+  });
+}
+$("save-place").addEventListener("click", () => {
+  if (!state.start) return;
+  const name = prompt("Name this place:", loadPlaces().length ? "" : "Home");
+  if (!name) return;
+  const places = loadPlaces().filter((p) => p.name !== name);
+  places.push({ name, lat: state.start.lat, lng: state.start.lng });
+  storePlaces(places);
+  renderPlaces();
+});
+renderPlaces();
 
 /* ---- geocoding ---- */
 let searchTimer = null;
@@ -159,61 +213,128 @@ function render(data) {
   status(msg);
 }
 
-/* ---- compute ---- */
-async function compute(forceLocal = false) {
-  if (!state.start || state.busy) return;
-  state.busy = true;
-  $("go").disabled = true;
-  status("Computing… (first run for an area downloads its street network)");
+/* ---- compute via background jobs (progress + cancel) ---- */
+const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
 
+function setProgressVisible(on) {
+  $("progress").hidden = !on;
+  if (!on) { $("bar-fill").style.width = "0%"; }
+}
+
+function buildBody(forceLocal) {
   const isTime = $("limit-type").value === "time";
   const overlays = [];
   if ($("ov-loops").checked) overlays.push("loops");
   if ($("ov-oab").checked) overlays.push("out_and_back");
   if ($("ov-tree").checked) overlays.push("tree");
-
   const distVal = Number($("limit-value").value) * (usingMiles() ? KM_PER_MI : 1);
-  const body = {
+  return {
     lat: state.start.lat, lng: state.start.lng, mode: state.mode,
     limit_minutes: isTime ? Number($("limit-value").value) : null,
     limit_km: isTime ? null : distVal,
     overlays, provider: "auto", force_local: forceLocal,
   };
+}
+
+function confirmBigArea(error) {
+  const radius = usingMiles()
+    ? `${(error.radius_km / KM_PER_MI).toFixed(1)} mi` : `${error.radius_km} km`;
+  const extra = error.hosted_available
+    ? "" : "\n(Tip: set ORS_API_KEY to offload big areas to a hosted provider.)";
+  return confirm(
+    `This needs the street network for a ~${radius} radius area. ` +
+    `The first download for an area this size can take a few minutes, ` +
+    `but it's cached — repeat queries are fast. You can cancel anytime.` +
+    `\n\nDownload and compute?${extra}`
+  );
+}
+
+async function compute(forceLocal = false) {
+  if (!state.start || state.busy) return;
+  state.busy = true;
+  $("go").disabled = true;
+  status("");
+  saveSettings();
 
   try {
-    const r = await fetch("/api/isochrone", {
+    const r = await fetch("/api/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(buildBody(forceLocal)),
     });
-    if (r.status === 409) {
-      const detail = (await r.json()).detail;
-      const radius = usingMiles()
-        ? `${(detail.radius_km / KM_PER_MI).toFixed(0)} mi` : `${detail.radius_km} km`;
-      const extra = detail.hosted_available
-        ? "" : "\n(Tip: set ORS_API_KEY to offload big areas to a hosted provider.)";
-      const ok = confirm(
-        `This needs the street network for a ~${radius} radius area. ` +
-        `The first download for an area this size can take a few minutes, ` +
-        `but it's cached — repeat queries are fast.\n\nDownload and compute?${extra}`
-      );
-      if (ok) {
-        state.busy = false; $("go").disabled = false;
-        return compute(true);
-      }
-      status("Cancelled — try a smaller limit, or confirm next time to proceed.");
-      return;
-    }
     if (!r.ok) {
       const err = await r.json();
       throw new Error(typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail));
     }
-    render(await r.json());
+    state.jobId = (await r.json()).job_id;
+    setProgressVisible(true);
+
+    while (true) {
+      await sleep(500);
+      const s = await (await fetch(`/api/jobs/${state.jobId}`)).json();
+      $("bar-fill").style.width = `${Math.round(s.progress * 100)}%`;
+      $("progress-stage").textContent = s.stage;
+      $("progress-time").textContent = `${Math.round(s.elapsed_s)}s`;
+
+      if (s.status === "done") {
+        setProgressVisible(false);
+        render(s.result);
+        return;
+      }
+      if (s.status === "cancelled") {
+        setProgressVisible(false);
+        status("Cancelled. (Any download already in flight still finishes and is cached, so retrying later is faster.)");
+        return;
+      }
+      if (s.status === "error") {
+        setProgressVisible(false);
+        if (s.error && s.error.reason === "area_too_large") {
+          if (confirmBigArea(s.error)) {
+            state.busy = false;
+            return compute(true);
+          }
+          status("Skipped — try a smaller limit, or confirm next time to proceed.");
+          return;
+        }
+        throw new Error(s.error ? s.error.message : "computation failed");
+      }
+    }
   } catch (err) {
+    setProgressVisible(false);
     status(`Failed: ${err.message}`, true);
   } finally {
     state.busy = false;
+    state.jobId = null;
     $("go").disabled = !state.start;
   }
 }
 $("go").addEventListener("click", () => compute(false));
+$("cancel").addEventListener("click", () => {
+  if (state.jobId) fetch(`/api/jobs/${state.jobId}/cancel`, { method: "POST" });
+});
+
+/* ---- remember last settings ---- */
+function saveSettings() {
+  localStorage.setItem("roam.settings", JSON.stringify({
+    mode: state.mode,
+    limitType: $("limit-type").value,
+    limitValue: $("limit-value").value,
+    units: $("units").value,
+    loops: $("ov-loops").checked,
+    oab: $("ov-oab").checked,
+    tree: $("ov-tree").checked,
+  }));
+}
+(function restoreSettings() {
+  const s = JSON.parse(localStorage.getItem("roam.settings") || "null");
+  if (!s) return;
+  state.mode = s.mode || "walk";
+  $("limit-type").value = s.limitType || "time";
+  $("units").value = s.units || $("units").value;
+  $("limit-slider").max = $("limit-type").value === "time" ? 120 : usingMiles() ? 30 : 50;
+  $("limit-value").value = s.limitValue || 15;
+  $("limit-slider").value = $("limit-value").value;
+  $("ov-loops").checked = !!s.loops;
+  $("ov-oab").checked = !!s.oab;
+  $("ov-tree").checked = !!s.tree;
+})();

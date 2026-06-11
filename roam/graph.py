@@ -17,6 +17,13 @@ from .modes import Mode
 
 CACHE_DIR = Path.home() / ".cache" / "roam" / "graphs"
 
+# osmnx defaults split anything bigger than 50 km^2 into many sequential
+# Overpass requests (an 8 mi walking range became 32 separate downloads).
+# One large query is far faster; give it a generous server-side timeout.
+ox.settings.max_query_area_size = 4_000_000_000  # m^2 (~4,000 km^2)
+ox.settings.requests_timeout = 300
+ox.settings.cache_folder = str(Path.home() / ".cache" / "roam" / "osmnx")
+
 
 def _cache_key(lat: float, lng: float, radius_m: float, network_type: str) -> Path:
     raw = f"{lat:.4f},{lng:.4f},{int(radius_m)},{network_type}"

@@ -17,6 +17,10 @@
     </div>
     <ul id="search-results"></ul>
 
+    <h2>Saved places</h2>
+    <div id="places" class="chips"></div>
+    <button id="save-place" class="ghost" disabled>＋ Save current start…</button>
+
     <h2>Mode</h2>
     <div id="modes" class="btn-group"></div>
     <div id="planned-modes" class="planned"></div>
@@ -41,6 +45,16 @@
     <label><input type="checkbox" id="ov-tree" /> Reachable streets</label>
 
     <button id="go" disabled>Shade the map</button>
+
+    <div id="progress" hidden>
+      <div class="bar"><div id="bar-fill"></div></div>
+      <div class="progress-row">
+        <span id="progress-stage"></span>
+        <span id="progress-time"></span>
+      </div>
+      <button id="cancel" class="ghost">Cancel</button>
+    </div>
+
     <div id="status"></div>
     <div id="routes"></div>
   </aside>

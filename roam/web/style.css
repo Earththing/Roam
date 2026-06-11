@@ -3,7 +3,8 @@ html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
 body { display: flex; }
 
 #panel {
-  width: 300px; min-width: 300px; padding: 16px; overflow-y: auto;
+  width: 320px; min-width: 260px; max-width: 60vw; padding: 16px;
+  overflow: auto; resize: horizontal;
   background: #1c2330; color: #e8ecf3;
 }
 #panel h1 { margin: 0 0 4px; font-size: 22px; }
@@ -13,12 +14,48 @@ body { display: flex; }
 .row { display: flex; gap: 6px; }
 
 input[type="text"], input[type="number"], select {
-  width: 100%; padding: 7px 9px; border-radius: 6px; border: 1px solid #3a4658;
-  background: #28324300; background-color: #283243; color: #e8ecf3; font-size: 14px;
+  padding: 7px 9px; border-radius: 6px; border: 1px solid #3a4658;
+  background-color: #283243; color: #e8ecf3; font-size: 14px;
+  min-width: 0;
 }
+.row > * { flex: 1; }
 input[type="range"] { width: 100%; margin-top: 8px; }
-#units { flex: 0 0 60px; }
-#limit-value { flex: 1; }
+#search { width: 100%; }
+#limit-type { flex: 0 0 122px; }
+#limit-value { flex: 1; min-width: 64px; }
+#units { flex: 0 0 58px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px;
+  border-radius: 14px; background: #283243; border: 1px solid #3a4658;
+  font-size: 13px; cursor: pointer;
+}
+.chip:hover { background: #2d3a50; }
+.chip .x { color: #7d8aa1; font-weight: 700; padding: 0 2px; }
+.chip .x:hover { color: #f08c8c; }
+
+button.ghost {
+  margin-top: 6px; padding: 6px 10px; border-radius: 6px; font-size: 13px;
+  background: transparent; border: 1px dashed #3a4658; color: #9fb0c8;
+  cursor: pointer; width: 100%;
+}
+button.ghost:hover { border-color: #5b6c85; color: #c4d0e2; }
+button.ghost:disabled { opacity: 0.45; cursor: not-allowed; }
+
+#progress { margin-top: 12px; }
+.bar {
+  height: 8px; border-radius: 4px; background: #283243; overflow: hidden;
+}
+#bar-fill {
+  height: 100%; width: 0%; border-radius: 4px; background: #3b82f6;
+  transition: width 0.4s ease;
+}
+.progress-row {
+  display: flex; justify-content: space-between; margin-top: 6px;
+  font-size: 12.5px; color: #9fb0c8;
+}
+#cancel { border-style: solid; }
 
 #search-results { list-style: none; margin: 6px 0 0; padding: 0; }
 #search-results li {

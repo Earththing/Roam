@@ -23,7 +23,10 @@ walking ranges, minutes for very large ones); it's cached under
 `~/.cache/roam/` after that.
 
 Distances can be entered in miles or kilometers (the toggle defaults to miles
-for US browser locales); the JSON API itself is always metric.
+for US browser locales); the JSON API itself is always metric. Computations
+run as background jobs with a progress bar and a Cancel button; starting
+points can be saved as named places ("Home") in the browser. The sidebar is
+resizable (drag its bottom-right corner).
 
 Run the tests (no network needed — they use a synthetic street grid):
 
