@@ -185,13 +185,16 @@ $("units").addEventListener("change", () => {
 /* ---- rendering ---- */
 const ROUTE_COLORS = ["#e74c3c", "#9b59b6", "#e67e22", "#1abc9c", "#f1c40f", "#2ecc71"];
 
+const KIND_LABEL = { loop: "Loop", out_and_back: "Out & back", one_way: "One way" };
+
 function fmtRoute(rt) {
+  const label = KIND_LABEL[rt.kind] || rt.kind;
   const dist = fmtDist(rt.length_m);
   if (rt.unit === "s") {
     const min = Math.round(rt.cost / 60);
-    return `${rt.kind === "loop" ? "Loop" : "Out & back"} ${rt.bearing} — ${min} min, ${dist}`;
+    return `${label} ${rt.bearing} — ${min} min, ${dist}`;
   }
-  return `${rt.kind === "loop" ? "Loop" : "Out & back"} ${rt.bearing} — ${dist}`;
+  return `${label} ${rt.bearing} — ${dist}`;
 }
 
 function render(data) {
@@ -224,7 +227,7 @@ function render(data) {
   }
 
   let colorIdx = 0;
-  for (const key of ["loops", "out_and_back"]) {
+  for (const key of ["loops", "out_and_back", "one_way"]) {
     (data.overlays[key] || []).forEach((rt) => {
       const color = ROUTE_COLORS[colorIdx++ % ROUTE_COLORS.length];
       const line = L.polyline(rt.coords.map(([lng, lat]) => [lat, lng]), {
@@ -278,7 +281,7 @@ function updateURL() {
     v: $("limit-value").value,
     u: $("units").value,
     rings: $("rings").value,
-    ov: ["ov-loops", "ov-oab", "ov-tree"].filter((id) => $(id).checked).join("."),
+    ov: ["ov-loops", "ov-oab", "ov-oneway", "ov-tree"].filter((id) => $(id).checked).join("."),
   });
   history.replaceState(null, "", `?${p}`);
 }
@@ -296,6 +299,7 @@ function buildBody(forceLocal) {
   const overlays = [];
   if ($("ov-loops").checked) overlays.push("loops");
   if ($("ov-oab").checked) overlays.push("out_and_back");
+  if ($("ov-oneway").checked) overlays.push("one_way");
   if ($("ov-tree").checked) overlays.push("tree");
   const distVal = Number($("limit-value").value) * (usingMiles() ? KM_PER_MI : 1);
   return {
@@ -325,6 +329,7 @@ async function compute(forceLocal = false) {
   if (state.busy) { state.queued = true; return; }
   state.busy = true;
   $("go").disabled = true;
+  $("go").classList.remove("attention");
   status("");
   saveSettings();
 
@@ -406,10 +411,14 @@ $("cancel").addEventListener("click", () => {
 let recomputeTimer = null;
 function scheduleRecompute() {
   if (!state.hasResult || !state.start) return;
+  if (!$("auto-update").checked) {
+    $("go").classList.add("attention"); // nudge: settings changed, recompute when ready
+    return;
+  }
   clearTimeout(recomputeTimer);
   recomputeTimer = setTimeout(() => compute(state.lastForce || false), 500);
 }
-["limit-type", "units", "rings", "ov-loops", "ov-oab", "ov-tree"].forEach((id) =>
+["limit-type", "units", "rings", "ov-loops", "ov-oab", "ov-oneway", "ov-tree"].forEach((id) =>
   $(id).addEventListener("change", scheduleRecompute)
 );
 $("limit-slider").addEventListener("change", scheduleRecompute); // on release
@@ -425,7 +434,9 @@ function saveSettings() {
     rings: $("rings").value,
     loops: $("ov-loops").checked,
     oab: $("ov-oab").checked,
+    oneway: $("ov-oneway").checked,
     tree: $("ov-tree").checked,
+    autoUpdate: $("auto-update").checked,
   }));
 }
 function applySettings(s) {
@@ -438,7 +449,9 @@ function applySettings(s) {
   $("rings").value = s.rings || "1";
   $("ov-loops").checked = !!s.loops;
   $("ov-oab").checked = !!s.oab;
+  $("ov-oneway").checked = !!s.oneway;
   $("ov-tree").checked = !!s.tree;
+  if (s.autoUpdate !== undefined) $("auto-update").checked = !!s.autoUpdate;
 }
 (function initFromStorageAndURL() {
   const stored = JSON.parse(localStorage.getItem("roam.settings") || "null");
@@ -456,6 +469,7 @@ function applySettings(s) {
       rings: q.get("rings") || "1",
       loops: ov.includes("ov-loops"),
       oab: ov.includes("ov-oab"),
+      oneway: ov.includes("ov-oneway"),
       tree: ov.includes("ov-tree"),
     });
     const lat = Number(q.get("lat"));

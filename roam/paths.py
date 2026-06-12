@@ -29,11 +29,29 @@ LOOP_PENALTY = 4.0  # multiplier on already-used streets when routing back
 
 @dataclass
 class Route:
-    kind: str  # "loop" | "out_and_back"
+    kind: str  # "loop" | "out_and_back" | "one_way"
     coords: list[tuple[float, float]]  # (lng, lat) polyline
     cost: float  # in the isochrone's weight unit (seconds or meters)
     length_m: float
     bearing_label: str
+    roundness: float = 0.0  # isoperimetric quotient; 0 = out-and-back, 1 = circle
+
+
+def _roundness(coords: list[tuple[float, float]]) -> float:
+    """How loop-like a closed route is (4*pi*area / perimeter^2)."""
+    if len(coords) < 4:
+        return 0.0
+    kx = 111_320 * math.cos(math.radians(coords[0][1]))
+    ky = 110_540
+    xs = [c[0] * kx for c in coords]
+    ys = [c[1] * ky for c in coords]
+    area = 0.5 * abs(
+        sum(xs[i] * ys[i + 1] - xs[i + 1] * ys[i] for i in range(len(xs) - 1))
+    )
+    perimeter = sum(
+        math.hypot(xs[i + 1] - xs[i], ys[i + 1] - ys[i]) for i in range(len(xs) - 1)
+    )
+    return 0.0 if perimeter == 0 else 4 * math.pi * area / perimeter**2
 
 
 def _bearing(graph: nx.MultiDiGraph, a: int, b: int) -> float:
@@ -156,7 +174,86 @@ def suggest_out_and_back(
     return routes[:n]
 
 
+def _penalized_leg(sub, frm: int, to: int, weight: str, used: set) -> list[int] | None:
+    def penalized(u, v, data, _used=used):
+        # networkx hands multigraph callables the {key: attrs} dict.
+        w = min(float(d.get(weight, 0.0)) for d in data.values())
+        return w * LOOP_PENALTY if frozenset((u, v)) in _used else w
+
+    try:
+        return nx.shortest_path(sub, frm, to, weight=penalized)
+    except (nx.NetworkXNoPath, nx.NodeNotFound):
+        return None
+
+
 def suggest_loops(
+    graph: nx.MultiDiGraph, iso: IsochroneResult, n: int = 4
+) -> list[Route]:
+    """Triangle loops: out to A, across to B (~90 degrees away), home.
+
+    Two-leg loops (out one way, back another) tend to read as out-and-backs
+    because the return parallels the outbound. Adding a crosswise waypoint
+    forces the route to enclose area; a roundness filter rejects flat ones.
+    """
+    _, back_costs = _inbound_costs_and_preds(
+        graph, iso.start_node, iso.limit, iso.weight
+    )
+    sub = graph.subgraph(iso.costs.keys())
+
+    # Best waypoint per sector: most-outward node within the leg budget.
+    lo, hi = 0.22 * iso.limit, 0.40 * iso.limit
+    sector_best: dict[int, int] = {}
+    sector_cost: dict[int, float] = {}
+    for node, c in iso.costs.items():
+        if node == iso.start_node or not (lo <= c <= hi):
+            continue
+        if back_costs.get(node, float("inf")) > 0.45 * iso.limit:
+            continue
+        s = int(_bearing(graph, iso.start_node, node) // (360 / SECTORS))
+        if c > sector_cost.get(s, 0.0):
+            sector_best[s], sector_cost[s] = node, c
+
+    loops: list[Route] = []
+    for s in range(SECTORS):
+        a = sector_best.get(s)
+        b = sector_best.get((s + 2) % SECTORS)  # ~90 degrees away
+        if a is None or b is None or a == b:
+            continue
+        leg1 = _outbound_path(iso.predecessors, iso.start_node, a)
+        used = {frozenset(p) for p in zip(leg1, leg1[1:])}
+        leg2 = _penalized_leg(sub, a, b, iso.weight, used)
+        if leg2 is None:
+            continue
+        used |= {frozenset(p) for p in zip(leg2, leg2[1:])}
+        leg3 = _penalized_leg(sub, b, iso.start_node, iso.weight, used)
+        if leg3 is None:
+            continue
+        nodes = leg1 + leg2[1:] + leg3[1:]
+        coords, cost, length = _path_geometry(graph, nodes, iso.weight)
+        if not (0.7 * iso.limit <= cost <= 1.25 * iso.limit):
+            continue
+        q = _roundness(coords)
+        if q < 0.05:
+            continue
+        loops.append(
+            Route(
+                kind="loop",
+                coords=coords,
+                cost=cost,
+                length_m=length,
+                bearing_label=_bearing_label(_bearing(graph, iso.start_node, a)),
+                roundness=q,
+            )
+        )
+    # Favor round loops that use the budget well.
+    loops.sort(key=lambda r: abs(r.cost - iso.limit) / iso.limit - r.roundness)
+    if loops:
+        return loops[:n]
+    # Tiny areas may not support triangles; fall back to two-leg loops.
+    return _suggest_loops_two_leg(graph, iso, n)
+
+
+def _suggest_loops_two_leg(
     graph: nx.MultiDiGraph, iso: IsochroneResult, n: int = 4
 ) -> list[Route]:
     _, back_costs = _inbound_costs_and_preds(
@@ -198,6 +295,7 @@ def suggest_loops(
                 cost=cost,
                 length_m=length,
                 bearing_label=_bearing_label(_bearing(graph, iso.start_node, node)),
+                roundness=_roundness(coords),
             )
         )
     # Prefer loops that use most of the budget without exceeding it badly.
@@ -205,7 +303,40 @@ def suggest_loops(
     return routes[:n]
 
 
+def suggest_one_way(
+    graph: nx.MultiDiGraph, iso: IsochroneResult, n: int = 4
+) -> list[Route]:
+    """Routes to the frontier, one per compass direction — no return leg.
+
+    Useful when someone picks you up, you take transit back, or you just
+    want to see how far the budget carries you.
+    """
+    best: dict[int, tuple[float, int]] = {}
+    for node, c in iso.costs.items():
+        if node == iso.start_node or c < 0.8 * iso.limit:
+            continue
+        s = int(_bearing(graph, iso.start_node, node) // (360 / SECTORS))
+        if s not in best or c > best[s][0]:
+            best[s] = (c, node)
+    routes = []
+    for _, node in best.values():
+        nodes = _outbound_path(iso.predecessors, iso.start_node, node)
+        coords, cost, length = _path_geometry(graph, nodes, iso.weight)
+        routes.append(
+            Route(
+                kind="one_way",
+                coords=coords,
+                cost=cost,
+                length_m=length,
+                bearing_label=_bearing_label(_bearing(graph, iso.start_node, node)),
+            )
+        )
+    routes.sort(key=lambda r: -r.cost)
+    return routes[:n]
+
+
 SUGGESTERS = {
     "loops": suggest_loops,
     "out_and_back": suggest_out_and_back,
+    "one_way": suggest_one_way,
 }

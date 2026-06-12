@@ -9,7 +9,7 @@ from shapely.geometry import Point, shape
 from roam.graph import annotate_travel_times, nearest_node
 from roam.isochrone import compute_isochrone, reachability_tree_lines, ring_polygons
 from roam.modes import get_mode
-from roam.paths import suggest_loops, suggest_out_and_back
+from roam.paths import suggest_loops, suggest_one_way, suggest_out_and_back
 
 CENTER_LAT, CENTER_LNG = 42.36, -71.06
 SPACING_M = 100.0
@@ -150,7 +150,7 @@ def test_out_and_back_routes_close_and_fit_budget(walk_grid):
         assert r.cost >= 1000.0 * 0.5  # uses a decent share of the budget
 
 
-def test_loops_do_not_retrace(walk_grid):
+def test_loops_enclose_area(walk_grid):
     g, start = walk_grid
     iso = compute_isochrone(g, start, 1200.0, weight="length", mode_key="walk")
     routes = suggest_loops(g, iso, n=4)
@@ -158,7 +158,19 @@ def test_loops_do_not_retrace(walk_grid):
     for r in routes:
         assert r.kind == "loop"
         assert r.coords[0] == r.coords[-1]
-        assert r.cost <= 1200.0 * 1.2
-        # A genuine loop is longer than twice the farthest point only if it
-        # retraces; mostly-distinct out/back legs were enforced upstream.
-        assert len(set(r.coords)) > len(r.coords) * 0.6
+        assert r.cost <= 1200.0 * 1.25
+        # Triangle loops must actually enclose area, not read as out-and-backs.
+        assert r.roundness > 0.05
+
+
+def test_one_way_routes_reach_the_frontier(walk_grid):
+    g, start = walk_grid
+    iso = compute_isochrone(g, start, 1000.0, weight="length", mode_key="walk")
+    routes = suggest_one_way(g, iso, n=4)
+    assert routes
+    sx, sy = g.nodes[start]["x"], g.nodes[start]["y"]
+    for r in routes:
+        assert r.kind == "one_way"
+        assert r.coords[0] == pytest.approx((sx, sy))
+        assert r.coords[-1] != pytest.approx((sx, sy))  # goes somewhere
+        assert r.cost >= 1000.0 * 0.8  # uses most of the budget

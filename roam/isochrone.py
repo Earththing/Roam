@@ -23,10 +23,10 @@ from shapely.ops import substring, transform as shp_transform
 BUFFER_M = {"walk": 60.0, "bike": 90.0, "drive": 180.0}
 DEFAULT_BUFFER_M = 80.0
 
-# Above this many street segments, exact GEOS buffering takes minutes
-# (5+ min observed at ~140k); switch to grid-cell coverage, which is ~50x
-# faster and visually equivalent at the zoom levels big areas are viewed at.
-EXACT_BUFFER_MAX_LINES = 25_000
+# Above this many street segments, exact GEOS buffering gets slow (~1ms per
+# segment: 20s at 20k, 5+ min at 140k); switch to grid-cell coverage, which
+# is far faster and visually equivalent at the zoom such areas are viewed at.
+EXACT_BUFFER_MAX_LINES = 6_000
 
 
 @dataclass
