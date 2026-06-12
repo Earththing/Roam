@@ -107,6 +107,29 @@ def test_ring_polygons_nest_and_grow(walk_grid):
     assert rings[2][1].symmetric_difference(iso.polygon_wgs84).area < 1e-9
 
 
+def test_grid_coverage_polygon_for_large_networks(walk_grid, monkeypatch):
+    import roam.isochrone as iso_mod
+
+    # Force the fast-path used for county-sized networks and check it still
+    # produces a sane polygon.
+    monkeypatch.setattr(iso_mod, "EXACT_BUFFER_MAX_LINES", 10)
+    g, start = walk_grid
+    iso = compute_isochrone(g, start, 600.0, weight="length", mode_key="walk")
+    poly = iso.polygon_wgs84
+    assert poly.is_valid
+    assert poly.contains(Point(CENTER_LNG, CENTER_LAT))
+    minx, miny, maxx, maxy = poly.bounds
+    assert (maxy - CENTER_LAT) * 111_111 < 600 + 200  # limit + cell slack
+
+
+def test_radius_tiers():
+    from roam.graph import _tier_options
+
+    assert _tier_options(900)[0] == 1000.0
+    assert _tier_options(12_500)[0] == 16_000.0  # snaps up past the 12 km tier
+    assert _tier_options(200_000) == [200_000]  # beyond the largest tier
+
+
 def test_reachability_tree_spans_reached_nodes(walk_grid):
     g, start = walk_grid
     iso = compute_isochrone(g, start, 300.0, weight="length", mode_key="walk")

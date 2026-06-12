@@ -19,6 +19,23 @@ const status = (msg, isError = false) => {
 // The panel is user-resizable; tell Leaflet when its box changes.
 new ResizeObserver(() => map.invalidateSize()).observe($("panel"));
 
+/* ---- sidebar resize via drag divider ---- */
+$("divider").addEventListener("mousedown", (e) => {
+  e.preventDefault();
+  $("divider").classList.add("dragging");
+  const move = (ev) => {
+    const w = Math.min(Math.max(ev.clientX, 260), window.innerWidth * 0.6);
+    $("panel").style.width = `${w}px`;
+  };
+  const up = () => {
+    $("divider").classList.remove("dragging");
+    document.removeEventListener("mousemove", move);
+    document.removeEventListener("mouseup", up);
+  };
+  document.addEventListener("mousemove", move);
+  document.addEventListener("mouseup", up);
+});
+
 /* ---- start point ---- */
 function setStart(lat, lng, label) {
   state.start = { lat, lng };
@@ -322,14 +339,25 @@ async function compute(forceLocal = false) {
       throw new Error(typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail));
     }
     state.jobId = (await r.json()).job_id;
+    state.cancelRequested = false;
     setProgressVisible(true);
 
     while (true) {
       await sleep(500);
+      if (state.cancelRequested) {
+        setProgressVisible(false);
+        status("Cancelled. The server stops at its next step; an in-flight download still finishes into the cache, so retrying later is faster.");
+        return;
+      }
       const s = await (await fetch(`/api/jobs/${state.jobId}`)).json();
       $("bar-fill").style.width = `${Math.round(s.progress * 100)}%`;
       $("progress-stage").textContent = s.stage;
-      $("progress-time").textContent = `${Math.round(s.elapsed_s)}s`;
+      let t = `${Math.round(s.elapsed_s)}s`;
+      if (s.status === "running" && s.progress > 0.08 && s.elapsed_s > 3) {
+        const eta = (s.elapsed_s * (1 - s.progress)) / s.progress;
+        t += ` · roughly ${Math.max(1, Math.round(eta))}s left`;
+      }
+      $("progress-time").textContent = t;
 
       if (s.status === "done") {
         setProgressVisible(false);
@@ -371,6 +399,7 @@ async function compute(forceLocal = false) {
 $("go").addEventListener("click", () => compute(false));
 $("cancel").addEventListener("click", () => {
   if (state.jobId) fetch(`/api/jobs/${state.jobId}/cancel`, { method: "POST" });
+  state.cancelRequested = true; // stop the UI immediately, don't wait on the server
 });
 
 /* ---- auto-recompute on tweaks (after the first explicit compute) ---- */

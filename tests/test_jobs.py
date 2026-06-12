@@ -14,7 +14,7 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def fake_osm(monkeypatch):
-    def fetch_graph(lat, lng, radius_m, mode, use_cache=True):
+    def fetch_graph(lat, lng, radius_m, mode, use_cache=True, progress=None):
         g, _ = make_grid()
         return graphmod.annotate_travel_times(g, mode)
 
@@ -67,7 +67,7 @@ def test_job_surfaces_area_too_large_as_error():
 
 
 def test_job_cancel(monkeypatch):
-    def slow_fetch(lat, lng, radius_m, mode, use_cache=True):
+    def slow_fetch(lat, lng, radius_m, mode, use_cache=True, progress=None):
         time.sleep(0.4)  # long enough for the cancel to land first
         g, _ = make_grid()
         return graphmod.annotate_travel_times(g, mode)

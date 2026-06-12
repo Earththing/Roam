@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import networkx as nx
+import numpy as np
+import shapely
 from pyproj import Transformer
 from shapely.geometry import LineString, MultiLineString, Point
 from shapely.ops import substring, transform as shp_transform
@@ -20,6 +22,11 @@ from shapely.ops import substring, transform as shp_transform
 # How far (meters) the shaded area extends sideways from a reached street.
 BUFFER_M = {"walk": 60.0, "bike": 90.0, "drive": 180.0}
 DEFAULT_BUFFER_M = 80.0
+
+# Above this many street segments, exact GEOS buffering takes minutes
+# (5+ min observed at ~140k); switch to grid-cell coverage, which is ~50x
+# faster and visually equivalent at the zoom levels big areas are viewed at.
+EXACT_BUFFER_MAX_LINES = 25_000
 
 
 @dataclass
@@ -75,15 +82,28 @@ def _reached_lines(
     return lines
 
 
+def _grid_coverage(ml_local, cell: float):
+    """Union of grid cells touched by the streets — fast for huge networks."""
+    ml = shapely.segmentize(ml_local, cell / 2)  # vertex in every crossed cell
+    pts = shapely.get_coordinates(ml)
+    ij = np.unique(np.floor(pts / cell).astype(np.int64), axis=0)
+    boxes = shapely.box(
+        ij[:, 0] * cell, ij[:, 1] * cell, (ij[:, 0] + 1) * cell, (ij[:, 1] + 1) * cell
+    )
+    return shapely.coverage_union_all(boxes).simplify(cell * 0.4)
+
+
 def _buffer_polygon(lines: list[LineString], start_pt: Point, mode_key: str):
     fwd, inv = _local_transformers(start_pt.y, start_pt.x)
     buffer_m = BUFFER_M.get(mode_key, DEFAULT_BUFFER_M)
-    if lines:
-        merged_local = shp_transform(fwd.transform, MultiLineString(lines))
-        poly_local = merged_local.buffer(buffer_m, quad_segs=4)
-    else:
+    if not lines:
         poly_local = shp_transform(fwd.transform, start_pt).buffer(buffer_m)
-    poly_local = poly_local.simplify(buffer_m * 0.15)
+    elif len(lines) <= EXACT_BUFFER_MAX_LINES:
+        merged_local = shp_transform(fwd.transform, MultiLineString(lines))
+        poly_local = merged_local.buffer(buffer_m, quad_segs=4).simplify(buffer_m * 0.15)
+    else:
+        merged_local = shp_transform(fwd.transform, MultiLineString(lines))
+        poly_local = _grid_coverage(merged_local, buffer_m * 2)
     return shp_transform(inv.transform, poly_local)
 
 
@@ -113,12 +133,17 @@ def compute_isochrone(
 
 
 def ring_polygons(
-    graph: nx.MultiDiGraph, result: IsochroneResult, n_rings: int, mode_key: str
+    graph: nx.MultiDiGraph,
+    result: IsochroneResult,
+    n_rings: int,
+    mode_key: str,
+    full_polygon=None,
 ) -> list[tuple[float, object]]:
     """Nested sub-isochrones at limit/n, 2*limit/n, ... limit.
 
     Reuses the Dijkstra costs from the full computation, so extra rings cost
-    only polygon assembly. Returns (sub_limit, polygon) pairs, innermost first.
+    only polygon assembly (and the outermost ring reuses ``full_polygon`` when
+    provided). Returns (sub_limit, polygon) pairs, innermost first.
     """
     start_pt = Point(
         graph.nodes[result.start_node]["x"], graph.nodes[result.start_node]["y"]
@@ -126,6 +151,9 @@ def ring_polygons(
     rings = []
     for i in range(1, n_rings + 1):
         sub_limit = result.limit * i / n_rings
+        if i == n_rings and full_polygon is not None:
+            rings.append((sub_limit, full_polygon))
+            continue
         lines = _reached_lines(graph, result.costs, sub_limit, result.weight)
         rings.append((sub_limit, _buffer_polygon(lines, start_pt, mode_key)))
     return rings

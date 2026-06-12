@@ -12,7 +12,7 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def fake_osm(monkeypatch):
-    def fetch_graph(lat, lng, radius_m, mode, use_cache=True):
+    def fetch_graph(lat, lng, radius_m, mode, use_cache=True, progress=None):
         g, _ = make_grid()
         return graphmod.annotate_travel_times(g, mode)
 

@@ -4,9 +4,13 @@ body { display: flex; }
 
 #panel {
   width: 320px; min-width: 260px; max-width: 60vw; padding: 16px;
-  overflow: auto; resize: horizontal;
+  overflow-y: auto; flex: none;
   background: #1c2330; color: #e8ecf3;
 }
+#divider {
+  width: 6px; flex: none; cursor: col-resize; background: #141a24;
+}
+#divider:hover, #divider.dragging { background: #3b82f6; }
 #panel h1 { margin: 0 0 4px; font-size: 22px; }
 #panel h2 { margin: 18px 0 6px; font-size: 13px; text-transform: uppercase;
   letter-spacing: 0.06em; color: #9fb0c8; }

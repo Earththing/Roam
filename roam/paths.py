@@ -166,6 +166,9 @@ def suggest_loops(
         graph, iso.start_node, iso.costs, back_costs,
         budget_out=iso.limit * 0.5, budget_total=iso.limit,
     )
+    # Search the return leg only within the reachable area: on county-sized
+    # graphs an unrestricted Dijkstra per candidate takes minutes.
+    sub = graph.subgraph(iso.costs.keys())
     routes = []
     for node in candidates.values():
         out_nodes = _outbound_path(iso.predecessors, iso.start_node, node)
@@ -177,7 +180,7 @@ def suggest_loops(
             return w * LOOP_PENALTY if frozenset((u, v)) in _used else w
 
         try:
-            back_nodes = nx.shortest_path(graph, node, iso.start_node, weight=penalized)
+            back_nodes = nx.shortest_path(sub, node, iso.start_node, weight=penalized)
         except nx.NetworkXNoPath:
             continue
         nodes = out_nodes + back_nodes[1:]

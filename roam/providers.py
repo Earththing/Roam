@@ -73,11 +73,20 @@ class AreaTooLargeError(Exception):
         )
 
 
+# Cap the "reachable streets" overlay: county-sized areas have hundreds of
+# thousands of tree edges, and the browser chokes long before that.
+TREE_MAX_LINES = 30_000
+
+
 class LocalOSMProvider:
     name = "local-osm"
 
     def isochrone(self, req: IsochroneRequest, progress=None, cancel=None) -> IsochroneResponse:
         report = progress or (lambda stage, frac: None)
+        n_steps = 3 + (1 if req.overlays else 0)
+
+        def step(i: int, label: str, frac: float) -> None:
+            report(f"Step {i}/{n_steps}: {label}", frac)
 
         def check_cancel():
             if cancel is not None and cancel.is_set():
@@ -90,11 +99,17 @@ class LocalOSMProvider:
                 radius_m / 1000.0, mode, hosted_available=ors_key() is not None
             )
 
-        report("Downloading street network (one-time per area, cached)", 0.1)
-        g = graphmod.fetch_graph(req.lat, req.lng, radius_m, mode)
+        step(1, "Fetching street network", 0.05)
+        g = graphmod.fetch_graph(
+            req.lat,
+            req.lng,
+            radius_m,
+            mode,
+            progress=lambda label, f: step(1, label, 0.05 + f * 0.5),
+        )
         check_cancel()
 
-        report("Computing reachable area", 0.6)
+        step(2, "Computing reachable area", 0.6)
         start = graphmod.nearest_node(g, req.lat, req.lng)
         iso = isomod.compute_isochrone(
             g, start, req.limit_value, weight=req.weight, mode_key=mode.key
@@ -103,21 +118,31 @@ class LocalOSMProvider:
 
         rings = None
         if req.rings > 1:
+            step(3, "Building bands", 0.72)
             rings = [
                 {"limit": round(sub_limit, 1), "polygon": mapping(poly)}
-                for sub_limit, poly in isomod.ring_polygons(g, iso, req.rings, mode.key)
+                for sub_limit, poly in isomod.ring_polygons(
+                    g, iso, req.rings, mode.key, full_polygon=iso.polygon_wgs84
+                )
             ]
+        else:
+            step(3, "Building the shaded area", 0.72)
 
         overlays: dict[str, Any] = {}
         if req.overlays:
-            report("Suggesting routes", 0.8)
+            step(4, "Suggesting routes", 0.82)
         for name in req.overlays:
             check_cancel()
             if name == "tree":
                 lines = isomod.reachability_tree_lines(g, iso)
+                if len(lines) > TREE_MAX_LINES:
+                    stride = -(-len(lines) // TREE_MAX_LINES)  # ceil division
+                    lines = lines[::stride]
                 overlays["tree"] = {
                     "type": "MultiLineString",
-                    "coordinates": [list(l.coords) for l in lines],
+                    "coordinates": [
+                        [(round(x, 5), round(y, 5)) for x, y in l.coords] for l in lines
+                    ],
                 }
             elif name in pathsmod.SUGGESTERS:
                 routes = pathsmod.SUGGESTERS[name](g, iso)
