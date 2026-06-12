@@ -8,6 +8,9 @@
 - Big-area guard with "compute anyway" override; optional hosted polygon via
   OpenRouteService (`ORS_API_KEY`).
 - Engine tests on a synthetic street grid (run offline).
+- Background jobs with progress stages and cancel; mi/km units; saved
+  places; graduated rings (2-4 bands); GPX export of suggested routes;
+  permalink URLs; auto-recompute on setting tweaks.
 
 ## Phase 2 — transit
 - GTFS feed loader (per-region; e.g. MBTA, BART) and a time-dependent
@@ -27,8 +30,6 @@
 - POI-aware out-and-back: route to parks/viewpoints/cafés (OSM amenity
   tags) instead of arbitrary frontier points.
 - Elevation awareness for walking/biking (slope-adjusted speeds, "flat
-  routes only" toggle).
-- Multiple simultaneous limits (15/30/45-min rings).
+  routes only" toggle); needs a DEM source, e.g. Open-Elevation or SRTM.
 - Two-point overlap mode: "where can both of us reach in 20 minutes?"
-- Export: GPX download of a suggested route for a watch/phone.
 - Deployment recipe (Dockerfile + auth) for phone use away from home.

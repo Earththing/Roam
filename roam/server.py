@@ -37,6 +37,7 @@ class IsochroneBody(BaseModel):
     limit_minutes: float | None = Field(default=None, gt=0, le=24 * 60)
     limit_km: float | None = Field(default=None, gt=0, le=2000)
     overlays: list[str] = []
+    rings: int = Field(default=1, ge=1, le=6)
     provider: str = "auto"  # auto | local-osm | openrouteservice
     force_local: bool = False
 
@@ -75,6 +76,7 @@ def _to_request(body: IsochroneBody) -> IsochroneRequest:
         limit_minutes=body.limit_minutes,
         limit_km=body.limit_km,
         overlays=body.overlays,
+        rings=body.rings,
         force_local=body.force_local,
     )
 
@@ -84,6 +86,7 @@ def _payload(result: IsochroneResponse) -> dict:
         "polygon": result.polygon,
         "provider": result.provider,
         "overlays": result.overlays,
+        "rings": result.rings,
         "warning": result.warning,
         "stats": result.stats,
     }

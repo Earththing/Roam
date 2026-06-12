@@ -27,10 +27,12 @@ function setStart(lat, lng, label) {
   startMarker.on("dragend", () => {
     const p = startMarker.getLatLng();
     state.start = { lat: p.lat, lng: p.lng };
+    scheduleRecompute();
   });
   $("go").disabled = false;
   $("save-place").disabled = false;
   if (label) status(`Start: ${label.split(",").slice(0, 2).join(",")}`);
+  scheduleRecompute();
 }
 map.on("click", (e) => setStart(e.latlng.lat, e.latlng.lng));
 
@@ -125,6 +127,7 @@ async function loadModes() {
       state.mode = m.key;
       box.querySelectorAll("button").forEach((x) => x.classList.remove("active"));
       b.classList.add("active");
+      scheduleRecompute();
     };
     box.appendChild(b);
   });
@@ -178,11 +181,23 @@ function render(data) {
   resultLayers.clearLayers();
   $("routes").innerHTML = "";
 
-  const poly = L.geoJSON(
-    { type: "Feature", geometry: data.polygon },
-    { style: { color: "#3b82f6", weight: 2, fillColor: "#3b82f6", fillOpacity: 0.25 } }
-  ).addTo(resultLayers);
-  map.fitBounds(poly.getBounds(), { padding: [30, 30] });
+  let outer;
+  if (data.rings && data.rings.length > 1) {
+    // Outermost first so inner bands stack on top and read darker.
+    [...data.rings].reverse().forEach((ring, i) => {
+      const layer = L.geoJSON(
+        { type: "Feature", geometry: ring.polygon },
+        { style: { color: "#3b82f6", weight: i === 0 ? 2 : 1, fillColor: "#3b82f6", fillOpacity: 0.13 } }
+      ).addTo(resultLayers);
+      if (i === 0) outer = layer;
+    });
+  } else {
+    outer = L.geoJSON(
+      { type: "Feature", geometry: data.polygon },
+      { style: { color: "#3b82f6", weight: 2, fillColor: "#3b82f6", fillOpacity: 0.25 } }
+    ).addTo(resultLayers);
+  }
+  map.fitBounds(outer.getBounds(), { padding: [30, 30] });
 
   if (data.overlays.tree) {
     L.geoJSON(
@@ -201,16 +216,54 @@ function render(data) {
       const item = document.createElement("div");
       item.className = "route-item";
       item.innerHTML = `<div class="swatch" style="background:${color}"></div>
-        <div style="flex:1">${fmtRoute(rt)}</div>`;
+        <div style="flex:1">${fmtRoute(rt)}</div><span class="gpx" title="Download GPX">GPX</span>`;
       item.onclick = () => { map.fitBounds(line.getBounds(), { padding: [40, 40] }); line.openPopup(); };
+      item.querySelector(".gpx").onclick = (e) => { e.stopPropagation(); downloadGPX(rt); };
       $("routes").appendChild(item);
     });
   }
 
+  state.hasResult = true;
+  updateURL();
   let msg = `Done (${data.provider}).`;
   if (data.stats.reached_nodes) msg += ` ${data.stats.reached_nodes} street corners reachable.`;
   if (data.warning) msg += ` ${data.warning}`;
   status(msg);
+}
+
+/* ---- GPX export ---- */
+function downloadGPX(rt) {
+  const name = `Roam ${rt.kind === "loop" ? "loop" : "out-and-back"} ${rt.bearing} (${fmtDist(rt.length_m)})`;
+  const pts = rt.coords
+    .map(([lng, lat]) => `<trkpt lat="${lat.toFixed(6)}" lon="${lng.toFixed(6)}"></trkpt>`)
+    .join("\n      ");
+  const gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Roam" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk><name>${name}</name><trkseg>
+      ${pts}
+  </trkseg></trk>
+</gpx>`;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([gpx], { type: "application/gpx+xml" }));
+  a.download = `roam-${rt.kind}-${rt.bearing}.gpx`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/* ---- permalink ---- */
+function updateURL() {
+  if (!state.start) return;
+  const p = new URLSearchParams({
+    lat: state.start.lat.toFixed(6),
+    lng: state.start.lng.toFixed(6),
+    mode: state.mode,
+    lt: $("limit-type").value,
+    v: $("limit-value").value,
+    u: $("units").value,
+    rings: $("rings").value,
+    ov: ["ov-loops", "ov-oab", "ov-tree"].filter((id) => $(id).checked).join("."),
+  });
+  history.replaceState(null, "", `?${p}`);
 }
 
 /* ---- compute via background jobs (progress + cancel) ---- */
@@ -232,7 +285,8 @@ function buildBody(forceLocal) {
     lat: state.start.lat, lng: state.start.lng, mode: state.mode,
     limit_minutes: isTime ? Number($("limit-value").value) : null,
     limit_km: isTime ? null : distVal,
-    overlays, provider: "auto", force_local: forceLocal,
+    overlays, rings: Number($("rings").value),
+    provider: "auto", force_local: forceLocal,
   };
 }
 
@@ -250,7 +304,8 @@ function confirmBigArea(error) {
 }
 
 async function compute(forceLocal = false) {
-  if (!state.start || state.busy) return;
+  if (!state.start) return;
+  if (state.busy) { state.queued = true; return; }
   state.busy = true;
   $("go").disabled = true;
   status("");
@@ -278,6 +333,7 @@ async function compute(forceLocal = false) {
 
       if (s.status === "done") {
         setProgressVisible(false);
+        state.lastForce = forceLocal;
         render(s.result);
         return;
       }
@@ -306,12 +362,29 @@ async function compute(forceLocal = false) {
     state.busy = false;
     state.jobId = null;
     $("go").disabled = !state.start;
+    if (state.queued) {
+      state.queued = false;
+      compute(state.lastForce || false);
+    }
   }
 }
 $("go").addEventListener("click", () => compute(false));
 $("cancel").addEventListener("click", () => {
   if (state.jobId) fetch(`/api/jobs/${state.jobId}/cancel`, { method: "POST" });
 });
+
+/* ---- auto-recompute on tweaks (after the first explicit compute) ---- */
+let recomputeTimer = null;
+function scheduleRecompute() {
+  if (!state.hasResult || !state.start) return;
+  clearTimeout(recomputeTimer);
+  recomputeTimer = setTimeout(() => compute(state.lastForce || false), 500);
+}
+["limit-type", "units", "rings", "ov-loops", "ov-oab", "ov-tree"].forEach((id) =>
+  $(id).addEventListener("change", scheduleRecompute)
+);
+$("limit-slider").addEventListener("change", scheduleRecompute); // on release
+$("limit-value").addEventListener("change", scheduleRecompute);
 
 /* ---- remember last settings ---- */
 function saveSettings() {
@@ -320,21 +393,46 @@ function saveSettings() {
     limitType: $("limit-type").value,
     limitValue: $("limit-value").value,
     units: $("units").value,
+    rings: $("rings").value,
     loops: $("ov-loops").checked,
     oab: $("ov-oab").checked,
     tree: $("ov-tree").checked,
   }));
 }
-(function restoreSettings() {
-  const s = JSON.parse(localStorage.getItem("roam.settings") || "null");
-  if (!s) return;
+function applySettings(s) {
   state.mode = s.mode || "walk";
   $("limit-type").value = s.limitType || "time";
   $("units").value = s.units || $("units").value;
   $("limit-slider").max = $("limit-type").value === "time" ? 120 : usingMiles() ? 30 : 50;
   $("limit-value").value = s.limitValue || 15;
   $("limit-slider").value = $("limit-value").value;
+  $("rings").value = s.rings || "1";
   $("ov-loops").checked = !!s.loops;
   $("ov-oab").checked = !!s.oab;
   $("ov-tree").checked = !!s.tree;
+}
+(function initFromStorageAndURL() {
+  const stored = JSON.parse(localStorage.getItem("roam.settings") || "null");
+  if (stored) applySettings(stored);
+
+  // Permalink (?lat=…&mode=…) overrides stored settings and auto-computes.
+  const q = new URLSearchParams(location.search);
+  if (q.has("lat") && q.has("lng")) {
+    const ov = (q.get("ov") || "").split(".");
+    applySettings({
+      mode: q.get("mode") || "walk",
+      limitType: q.get("lt") || "time",
+      limitValue: q.get("v") || 15,
+      units: q.get("u") || $("units").value,
+      rings: q.get("rings") || "1",
+      loops: ov.includes("ov-loops"),
+      oab: ov.includes("ov-oab"),
+      tree: ov.includes("ov-tree"),
+    });
+    const lat = Number(q.get("lat"));
+    const lng = Number(q.get("lng"));
+    map.setView([lat, lng], 14);
+    setStart(lat, lng);
+    compute(false);
+  }
 })();

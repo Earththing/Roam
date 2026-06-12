@@ -24,6 +24,9 @@ def serve(
     host: str = typer.Option("127.0.0.1", help="Bind address (0.0.0.0 to expose)."),
     port: int = typer.Option(8000),
     reload: bool = typer.Option(False, help="Auto-reload on code changes."),
+    access_log: bool = typer.Option(
+        False, help="Log every request (noisy: progress polling hits the API twice a second)."
+    ),
 ):
     """Start the web app, then open http://127.0.0.1:8000 in a browser."""
     # Don't let an in-flight computation hold the process hostage on Ctrl-C.
@@ -32,6 +35,7 @@ def serve(
         host=host,
         port=port,
         reload=reload,
+        access_log=access_log,
         timeout_graceful_shutdown=3,
     )
 

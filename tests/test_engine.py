@@ -6,8 +6,8 @@ import networkx as nx
 import pytest
 from shapely.geometry import Point, shape
 
-from roam.graph import annotate_travel_times
-from roam.isochrone import compute_isochrone, reachability_tree_lines
+from roam.graph import annotate_travel_times, nearest_node
+from roam.isochrone import compute_isochrone, reachability_tree_lines, ring_polygons
 from roam.modes import get_mode
 from roam.paths import suggest_loops, suggest_out_and_back
 
@@ -84,6 +84,27 @@ def test_isochrone_polygon_contains_start_and_hugs_limit(walk_grid):
         (CENTER_LAT - miny) * 111_111,
     )
     assert max_extent_m < 800 + 100  # limit + buffer slack
+
+
+def test_nearest_node_without_sklearn(walk_grid):
+    g, start = walk_grid
+    # Slightly off-center should still snap to the center node.
+    assert nearest_node(g, CENTER_LAT + 0.0002, CENTER_LNG - 0.0002) == start
+    corner = max(g.nodes)
+    assert nearest_node(g, g.nodes[corner]["y"], g.nodes[corner]["x"]) == corner
+
+
+def test_ring_polygons_nest_and_grow(walk_grid):
+    g, start = walk_grid
+    iso = compute_isochrone(g, start, 800.0, weight="length", mode_key="walk")
+    rings = ring_polygons(g, iso, 3, "walk")
+    assert [round(lim) for lim, _ in rings] == [267, 533, 800]
+    areas = [poly.area for _, poly in rings]
+    assert areas[0] < areas[1] < areas[2]
+    # Inner rings sit inside the outer one (small buffer slack allowed).
+    assert rings[2][1].buffer(1e-4).contains(rings[0][1])
+    # The outermost ring matches the plain isochrone polygon.
+    assert rings[2][1].symmetric_difference(iso.polygon_wgs84).area < 1e-9
 
 
 def test_reachability_tree_spans_reached_nodes(walk_grid):

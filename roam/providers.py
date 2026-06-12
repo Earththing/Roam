@@ -32,6 +32,7 @@ class IsochroneRequest:
     limit_minutes: float | None = None  # exactly one of minutes/km is set
     limit_km: float | None = None
     overlays: list[str] = field(default_factory=list)  # loops | out_and_back | tree
+    rings: int = 1  # graduated bands: 1 = single area, n = n nested sub-areas
     force_local: bool = False  # user said "compute locally anyway"
 
     @property
@@ -47,9 +48,10 @@ class IsochroneRequest:
 
 @dataclass
 class IsochroneResponse:
-    polygon: dict  # GeoJSON geometry
+    polygon: dict  # GeoJSON geometry (the full / outermost area)
     provider: str
     overlays: dict[str, Any] = field(default_factory=dict)
+    rings: list[dict] | None = None  # [{limit, polygon}], innermost first
     warning: str | None = None
     stats: dict[str, Any] = field(default_factory=dict)
 
@@ -99,6 +101,13 @@ class LocalOSMProvider:
         )
         check_cancel()
 
+        rings = None
+        if req.rings > 1:
+            rings = [
+                {"limit": round(sub_limit, 1), "polygon": mapping(poly)}
+                for sub_limit, poly in isomod.ring_polygons(g, iso, req.rings, mode.key)
+            ]
+
         overlays: dict[str, Any] = {}
         if req.overlays:
             report("Suggesting routes", 0.8)
@@ -128,6 +137,7 @@ class LocalOSMProvider:
             polygon=mapping(iso.polygon_wgs84),
             provider=self.name,
             overlays=overlays,
+            rings=rings,
             stats={
                 "graph_nodes": g.number_of_nodes(),
                 "reached_nodes": len(iso.costs),

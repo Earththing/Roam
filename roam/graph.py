@@ -8,9 +8,11 @@ can treat time and distance uniformly.
 from __future__ import annotations
 
 import hashlib
+import math
 from pathlib import Path
 
 import networkx as nx
+import numpy as np
 import osmnx as ox
 
 from .modes import Mode
@@ -84,4 +86,15 @@ def annotate_travel_times(graph: nx.MultiDiGraph, mode: Mode) -> nx.MultiDiGraph
 
 
 def nearest_node(graph: nx.MultiDiGraph, lat: float, lng: float) -> int:
-    return ox.distance.nearest_nodes(graph, X=lng, Y=lat)
+    """Nearest graph node to a lat/lng point.
+
+    osmnx's nearest_nodes needs scikit-learn for unprojected graphs; a
+    vectorized argmin over node coordinates (with longitude scaled by
+    cos(latitude)) is plenty fast and avoids the dependency.
+    """
+    nodes = list(graph.nodes)
+    xs = np.array([graph.nodes[n]["x"] for n in nodes], dtype=float)
+    ys = np.array([graph.nodes[n]["y"] for n in nodes], dtype=float)
+    lng_scale = math.cos(math.radians(lat))
+    d2 = ((xs - lng) * lng_scale) ** 2 + (ys - lat) ** 2
+    return nodes[int(np.argmin(d2))]

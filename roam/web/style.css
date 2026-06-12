@@ -91,5 +91,10 @@ label { display: block; margin: 6px 0; font-size: 14px; cursor: pointer; }
 }
 .route-item:hover { background: #2d3a50; }
 .route-item .swatch { width: 10px; border-radius: 3px; flex: none; }
+.route-item .gpx {
+  flex: none; font-size: 11px; letter-spacing: 0.04em; color: #9fb0c8;
+  border: 1px solid #3a4658; border-radius: 4px; padding: 2px 6px;
+}
+.route-item .gpx:hover { color: #e8ecf3; border-color: #5b6c85; }
 
 #map { flex: 1; height: 100%; }

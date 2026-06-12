@@ -54,6 +54,24 @@ def test_isochrone_with_overlays():
     assert data["stats"]["reached_nodes"] > 0
 
 
+def test_isochrone_with_rings():
+    resp = client.post(
+        "/api/isochrone",
+        json={
+            "lat": CENTER_LAT,
+            "lng": CENTER_LNG,
+            "mode": "walk",
+            "limit_minutes": 10,
+            "rings": 3,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    rings = resp.json()["rings"]
+    assert len(rings) == 3
+    assert rings[0]["limit"] < rings[1]["limit"] < rings[2]["limit"]
+    assert all(r["polygon"]["type"] in ("Polygon", "MultiPolygon") for r in rings)
+
+
 def test_requires_exactly_one_limit():
     base = {"lat": CENTER_LAT, "lng": CENTER_LNG, "mode": "walk"}
     assert client.post("/api/isochrone", json=base).status_code == 422
