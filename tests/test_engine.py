@@ -122,6 +122,20 @@ def test_grid_coverage_polygon_for_large_networks(walk_grid, monkeypatch):
     assert (maxy - CENTER_LAT) * 111_111 < 600 + 200  # limit + cell slack
 
 
+def test_small_holes_filled_large_holes_kept():
+    from shapely.geometry import Polygon as ShpPolygon
+
+    from roam.isochrone import _fill_small_holes
+
+    outer = [(0, 0), (5000, 0), (5000, 5000), (0, 5000)]
+    small = [(100, 100), (400, 100), (400, 400), (100, 400)]  # 0.09 km^2 park
+    large = [(1000, 1000), (3000, 1000), (3000, 3000), (1000, 3000)]  # 4 km^2 lake
+    poly = ShpPolygon(outer, [small, large])
+    fixed = _fill_small_holes(poly)
+    assert len(fixed.interiors) == 1
+    assert ShpPolygon(fixed.interiors[0]).area == ShpPolygon(large).area
+
+
 def test_radius_tiers():
     from roam.graph import _tier_options
 

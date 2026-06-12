@@ -16,7 +16,7 @@ import networkx as nx
 import numpy as np
 import shapely
 from pyproj import Transformer
-from shapely.geometry import LineString, MultiLineString, Point
+from shapely.geometry import LineString, MultiLineString, MultiPolygon, Point, Polygon
 from shapely.ops import substring, transform as shp_transform
 
 # How far (meters) the shaded area extends sideways from a reached street.
@@ -27,6 +27,12 @@ DEFAULT_BUFFER_M = 80.0
 # segment: 20s at 20k, 5+ min at 140k); switch to grid-cell coverage, which
 # is far faster and visually equivalent at the zoom such areas are viewed at.
 EXACT_BUFFER_MAX_LINES = 6_000
+
+# Parks, school fields, and big parcels have no mapped streets inside them,
+# which would leave confusing holes in the shaded area even though anyone
+# can walk across a lawn. Enclosed holes below this size get filled; larger
+# ones (lakes, golf courses, fenced industrial sites) are kept as holes.
+FILL_HOLES_BELOW_M2 = 250_000.0  # 0.25 km^2
 
 
 @dataclass
@@ -93,6 +99,22 @@ def _grid_coverage(ml_local, cell: float):
     return shapely.coverage_union_all(boxes).simplify(cell * 0.4)
 
 
+def _fill_small_holes(geom, max_hole_area: float = FILL_HOLES_BELOW_M2):
+    """Drop interior rings smaller than ``max_hole_area`` (local meters)."""
+
+    def fix(p: Polygon) -> Polygon:
+        if not p.interiors:
+            return p
+        keep = [r for r in p.interiors if Polygon(r).area >= max_hole_area]
+        return Polygon(p.exterior, keep)
+
+    if geom.geom_type == "Polygon":
+        return fix(geom)
+    if geom.geom_type == "MultiPolygon":
+        return MultiPolygon([fix(p) for p in geom.geoms])
+    return geom
+
+
 def _buffer_polygon(lines: list[LineString], start_pt: Point, mode_key: str):
     fwd, inv = _local_transformers(start_pt.y, start_pt.x)
     buffer_m = BUFFER_M.get(mode_key, DEFAULT_BUFFER_M)
@@ -104,7 +126,7 @@ def _buffer_polygon(lines: list[LineString], start_pt: Point, mode_key: str):
     else:
         merged_local = shp_transform(fwd.transform, MultiLineString(lines))
         poly_local = _grid_coverage(merged_local, buffer_m * 2)
-    return shp_transform(inv.transform, poly_local)
+    return shp_transform(inv.transform, _fill_small_holes(poly_local))
 
 
 def compute_isochrone(
